@@ -1,5 +1,7 @@
 data/
 stargan_celeba_128/
+stargan_celeba/
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
