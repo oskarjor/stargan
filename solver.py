@@ -44,7 +44,7 @@ class Solver(object):
         self.beta2 = config.beta2
         self.resume_iters = config.resume_iters
         self.selected_attrs = config.selected_attrs
-
+        self.hair_attr_prob = config.hair_attr_prob
         # Test configurations.
         self.test_iters = config.test_iters
 
@@ -229,6 +229,12 @@ class Solver(object):
             start_iters = self.resume_iters
             self.restore_model(self.resume_iters)
 
+        # Generate target domain labels randomly.
+        hair_color_indices = []
+        for i, attr_name in enumerate(self.selected_attrs):
+            if attr_name in ["Black_Hair", "Blond_Hair", "Brown_Hair", "Gray_Hair"]:
+                hair_color_indices.append(i)
+
         # Start training.
         print("Start training...")
         start_time = time.time()
@@ -244,9 +250,14 @@ class Solver(object):
                 data_iter = iter(data_loader)
                 x_real, label_org = next(data_iter)
 
-            # Generate target domain labels randomly.
-            rand_idx = torch.randperm(label_org.size(0))
-            label_trg = label_org[rand_idx]
+            label_trg = torch.randint(0, 2, label_org.size(), dtype=torch.float32)
+            label_trg[:, hair_color_indices] = 0
+            # Randomly choose one hair color and set it to 1
+            if torch.rand(1) < self.hair_attr_prob:
+                random_hair_idx = hair_color_indices[
+                    torch.randint(0, len(hair_color_indices), (1,))
+                ]
+                label_trg[:, random_hair_idx] = 1
 
             if self.dataset == "CelebA":
                 c_org = label_org.clone()
