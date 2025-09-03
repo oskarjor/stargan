@@ -160,12 +160,6 @@ if __name__ == "__main__":
         help="selected attributes for the CelebA dataset",
         default=["Black_Hair", "Blond_Hair", "Brown_Hair", "Male", "Young"],
     )
-    parser.add_argument(
-        "--hair_attr_prob",
-        type=float,
-        default=0.62,
-        help="probability of having a hair attribute (is 0.62 for dataset)",
-    )
 
     # Test configuration.
     parser.add_argument(
