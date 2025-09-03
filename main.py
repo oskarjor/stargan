@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 from solver import Solver
 from data_loader import get_loader
 from torch.backends import cudnn
@@ -51,6 +52,10 @@ def main(config):
             config.mode,
             config.num_workers,
         )
+
+    # Save the config to a json file
+    with open(f"{config.model_save_dir}/config.json", "w") as f:
+        json.dump(config.__dict__, f)
 
     # Solver for training and testing StarGAN.
     solver = Solver(celeba_loader, rafd_loader, config)
@@ -185,7 +190,7 @@ if __name__ == "__main__":
     # Step size.
     parser.add_argument("--log_step", type=int, default=10)
     parser.add_argument("--sample_step", type=int, default=1000)
-    parser.add_argument("--model_save_step", type=int, default=10000)
+    parser.add_argument("--model_save_step", type=int, default=100)
     parser.add_argument("--lr_update_step", type=int, default=1000)
 
     config = parser.parse_args()
