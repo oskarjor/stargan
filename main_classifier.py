@@ -9,7 +9,7 @@ from data_loader import get_loader
 
 
 def train(model, celeba_loader_train, celeba_loader_test, config):
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
     print(f"Dataloader size: {len(celeba_loader_train)}")
