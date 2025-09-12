@@ -120,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--image_size", type=int, default=128)
     parser.add_argument(
         "--selected_attrs",
+        nargs="+",
         type=str,
         default=["Young"],
     )
