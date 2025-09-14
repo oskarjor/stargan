@@ -1,6 +1,5 @@
 import argparse
 import os
-from torch.backends import cudnn
 import torch
 import torch.nn as nn
 
@@ -15,6 +14,7 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
     print(f"Dataloader size: {len(celeba_loader_train)}")
     for epoch in range(config.num_epochs):
         total_loss = 0
+        accuracy = 0
         for images, labels in celeba_loader_train:
             images = images.to(config.device)
             labels = labels.to(config.device)
@@ -24,20 +24,29 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            preds = torch.round(outputs)
+            accuracy += (preds == labels).sum().item() / len(labels)
 
         print(f"Epoch {epoch}, Loss {total_loss / len(celeba_loader_train)}")
+        print(f"Epoch {epoch}, Accuracy {accuracy / len(celeba_loader_train)}")
 
         if epoch % config.save_epoch == 0:
             with torch.no_grad():
                 total_loss = 0
+                accuracy = 0
                 for images, labels in celeba_loader_test:
                     images = images.to(config.device)
                     labels = labels.to(config.device)
                     outputs = model(images)
                     loss = criterion(outputs, labels)
                     total_loss += loss.item()
+                    preds = torch.round(outputs)
+                    accuracy += (preds == labels).sum().item() / len(labels)
                 print(
                     f"Epoch {epoch}, Test Loss {total_loss / len(celeba_loader_test)}"
+                )
+                print(
+                    f"Epoch {epoch}, Test Accuracy {accuracy / len(celeba_loader_test)}"
                 )
 
             print("Saving model...")
