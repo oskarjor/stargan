@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from model import Generator, Discriminator
+from classifier import resnet18
+from data_loader import get_loader
+from utils import get_metrics
 
 
 def load_config_and_model(model_dir=None, model_name=None):
@@ -51,6 +54,15 @@ class DummyClassifier(nn.Module):
         return F.sigmoid(self.fc(x.view(x.size(0), -1)))
 
 
+def get_resnet_classifier(path=None):
+    if path is None:
+        raise ValueError("Path to resnet classifier is required")
+
+    resnet = resnet18(num_classes=1)
+    resnet.load_state_dict(torch.load(path, map_location=lambda storage, loc: storage))
+    return resnet
+
+
 class ConceptMaximizer(nn.Module):
     def __init__(self, config, G, classifier, batch_size=1, low=-1, high=1):
         super(ConceptMaximizer, self).__init__()
@@ -89,27 +101,71 @@ if __name__ == "__main__":
         model_dir="stargan_celeba/models", model_name="100"
     )
 
+    device = "mps"
+
     # Create dummy data
-    batch_size = 1
-    x = torch.randn(batch_size, 3, config["image_size"], config["image_size"])
-    concepts = torch.randn(batch_size, config["c_dim"], requires_grad=True)
+    # batch_size = 1
+    # x = torch.randn(batch_size, 3, config["image_size"], config["image_size"])
+    # concepts = torch.randn(batch_size, config["c_dim"], requires_grad=True)
 
     # Create dummy classifier and concept maximizer
-    classifier = DummyClassifier(config)
-    concept_maximizer = ConceptMaximizer(config, G, classifier, batch_size)
+    # concept_maximizer = ConceptMaximizer(config, G, classifier, batch_size).to(device)
 
-    # Train concept maximizer
-    optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, concept_maximizer.parameters()), lr=0.1
+    classifier = get_resnet_classifier("classifier/models/res_18_epoch_10.pth").to(
+        device
     )
-    criterion = nn.BCELoss()
-    for iter_num in range(1000):
-        optimizer.zero_grad()
-        cls_probs = concept_maximizer(x)
-        loss = criterion(cls_probs, torch.zeros_like(cls_probs))
-        loss.backward()
-        optimizer.step()
-        if iter_num % 100 == 0:
-            print(f"Iteration {iter_num}: Loss {loss.item()}")
-            print(f"Concepts: {concept_maximizer.constrain_concepts().data}")
-            print(f"Cls Probs: {cls_probs.data}")
+    celeba_loader_test = get_loader(
+        config["celeba_image_dir"],
+        config["attr_path"],
+        ["Young"],
+        config["celeba_crop_size"],
+        config["image_size"],
+        16,
+        "CelebA",
+        "test",
+        config["num_workers"],
+    )
+
+    total_true_positives = 0
+    total_true_negatives = 0
+    total_false_positives = 0
+    total_false_negatives = 0
+    for images, labels in celeba_loader_test:
+        images = images.to(device)
+        labels = labels.to(device)
+        probs = classifier(images)
+        preds = torch.round(probs)
+        true_positives, true_negatives, false_positives, false_negatives = get_metrics(
+            preds, labels
+        )
+        total_true_positives += true_positives
+        total_true_negatives += true_negatives
+        total_false_positives += false_positives
+        total_false_negatives += false_negatives
+    print(f"True Positives: {total_true_positives}")
+    print(f"True Negatives: {total_true_negatives}")
+    print(f"False Positives: {total_false_positives}")
+    print(f"False Negatives: {total_false_negatives}")
+    print(
+        f"Accuracy: {(total_true_positives + total_true_negatives) / (total_true_positives + total_true_negatives + total_false_positives + total_false_negatives)}"
+    )
+    print(f"True Positive Rate: {total_true_positives / (total_true_positives + total_false_negatives)}")
+    print(f"True Negative Rate: {total_true_negatives / (total_true_negatives + total_false_positives)}")
+    print(f"False Positive Rate: {total_false_positives / (total_false_positives + total_true_negatives)}")
+    print(f"False Negative Rate: {total_false_negatives / (total_false_negatives + total_true_positives)}")
+
+    # # Train concept maximizer
+    # optimizer = torch.optim.Adam(
+    #     filter(lambda p: p.requires_grad, concept_maximizer.parameters()), lr=0.1
+    # )
+    # criterion = nn.BCELoss()
+    # for iter_num in range(1000):
+    #     optimizer.zero_grad()
+    #     cls_probs = concept_maximizer(x)
+    #     loss = criterion(cls_probs, torch.zeros_like(cls_probs))
+    #     loss.backward()
+    #     optimizer.step()
+    #     if iter_num % 100 == 0:
+    #         print(f"Iteration {iter_num}: Loss {loss.item()}")
+    #         print(f"Concepts: {concept_maximizer.constrain_concepts().data}")
+    #         print(f"Cls Probs: {cls_probs.data}")
