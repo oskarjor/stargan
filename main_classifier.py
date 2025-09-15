@@ -7,6 +7,24 @@ from classifier import resnet18, resnet34, resnet50, resnet101, resnet152
 from data_loader import get_loader
 
 
+def get_metrics(predictions: torch.Tensor, labels: torch.Tensor):
+    """Calculate TP, TN, FP, FN between predicted and ground truth binary tensors.
+
+    Args:
+        predictions: Binary tensor of model predictions
+        labels: Binary tensor of ground truth labels
+
+    Returns:
+        tuple: (true_positives, true_negatives, false_positives, false_negatives)
+    """
+    true_positives = ((predictions == 1) & (labels == 1)).sum().item()
+    true_negatives = ((predictions == 0) & (labels == 0)).sum().item()
+    false_positives = ((predictions == 1) & (labels == 0)).sum().item()
+    false_negatives = ((predictions == 0) & (labels == 1)).sum().item()
+
+    return true_positives, true_negatives, false_positives, false_negatives
+
+
 def train(model, celeba_loader_train, celeba_loader_test, config):
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
@@ -14,7 +32,10 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
     print(f"Dataloader size: {len(celeba_loader_train)}")
     for epoch in range(config.num_epochs):
         total_loss = 0
-        accuracy = 0
+        total_true_positives = 0
+        total_true_negatives = 0
+        total_false_positives = 0
+        total_false_negatives = 0
         for images, labels in celeba_loader_train:
             images = images.to(config.device)
             labels = labels.to(config.device)
@@ -25,15 +46,36 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
             optimizer.step()
             total_loss += loss.item()
             preds = torch.round(outputs)
-            accuracy += (preds == labels).sum().item() / len(labels)
+
+            true_positives, true_negatives, false_positives, false_negatives = (
+                get_metrics(preds, labels)
+            )
+            total_true_positives += true_positives
+            total_true_negatives += true_negatives
+            total_false_positives += false_positives
+            total_false_negatives += false_negatives
 
         print(f"Epoch {epoch}, Loss {total_loss / len(celeba_loader_train)}")
-        print(f"Epoch {epoch}, Accuracy {accuracy / len(celeba_loader_train)}")
+        print(
+            f"Epoch {epoch}, True Positives {total_true_positives / len(celeba_loader_train)}"
+        )
+        print(
+            f"Epoch {epoch}, True Negatives {total_true_negatives / len(celeba_loader_train)}"
+        )
+        print(
+            f"Epoch {epoch}, False Positives {total_false_positives / len(celeba_loader_train)}"
+        )
+        print(
+            f"Epoch {epoch}, False Negatives {total_false_negatives / len(celeba_loader_train)}"
+        )
 
         if epoch % config.save_epoch == 0:
+            total_loss = 0
+            total_true_positives = 0
+            total_true_negatives = 0
+            total_false_positives = 0
+            total_false_negatives = 0
             with torch.no_grad():
-                total_loss = 0
-                accuracy = 0
                 for images, labels in celeba_loader_test:
                     images = images.to(config.device)
                     labels = labels.to(config.device)
@@ -41,16 +83,28 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
                     loss = criterion(outputs, labels)
                     total_loss += loss.item()
                     preds = torch.round(outputs)
-                    accuracy += (preds == labels).sum().item() / len(labels)
-                print(
-                    f"Epoch {epoch}, Test Loss {total_loss / len(celeba_loader_test)}"
-                )
-                print(
-                    f"Epoch {epoch}, Test Accuracy {accuracy / len(celeba_loader_test)}"
-                )
-
+                    true_positives, true_negatives, false_positives, false_negatives = (
+                        get_metrics(preds, labels)
+                    )
+                    total_true_positives += true_positives
+                    total_true_negatives += true_negatives
+                    total_false_positives += false_positives
+                    total_false_negatives += false_negatives
             print("Saving model...")
             torch.save(model.state_dict(), f"{config.model_save_dir}/model_{epoch}.pth")
+            print(f"Epoch {epoch}, Test Loss {total_loss / len(celeba_loader_test)}")
+            print(
+                f"Epoch {epoch}, Test True Positives {total_true_positives / len(celeba_loader_test)}"
+            )
+            print(
+                f"Epoch {epoch}, Test True Negatives {total_true_negatives / len(celeba_loader_test)}"
+            )
+            print(
+                f"Epoch {epoch}, Test False Positives {total_false_positives / len(celeba_loader_test)}"
+            )
+            print(
+                f"Epoch {epoch}, Test False Negatives {total_false_negatives / len(celeba_loader_test)}"
+            )
 
 
 def main(config):
