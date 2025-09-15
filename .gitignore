@@ -2,6 +2,8 @@ data/
 stargan_celeba_128/
 stargan_celeba/
 *.out
+classifier/models/
+classifier/logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
