@@ -39,19 +39,11 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
             total_false_positives += false_positives
             total_false_negatives += false_negatives
 
-        print(f"Epoch {epoch}, Loss {total_loss / len(celeba_loader_train)}")
-        print(
-            f"Epoch {epoch}, True Positives {total_true_positives / len(celeba_loader_train)}"
-        )
-        print(
-            f"Epoch {epoch}, True Negatives {total_true_negatives / len(celeba_loader_train)}"
-        )
-        print(
-            f"Epoch {epoch}, False Positives {total_false_positives / len(celeba_loader_train)}"
-        )
-        print(
-            f"Epoch {epoch}, False Negatives {total_false_negatives / len(celeba_loader_train)}"
-        )
+        print(f"Epoch {epoch}, Loss {total_loss}")
+        print(f"Epoch {epoch}, True Positives {total_true_positives}")
+        print(f"Epoch {epoch}, True Negatives {total_true_negatives}")
+        print(f"Epoch {epoch}, False Positives {total_false_positives}")
+        print(f"Epoch {epoch}, False Negatives {total_false_negatives}")
 
         if epoch % config.save_epoch == 0:
             total_loss = 0
@@ -78,18 +70,10 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
             print("Saving model...")
             torch.save(model.state_dict(), f"{config.model_save_dir}/model_{epoch}.pth")
             print(f"Epoch {epoch}, Test Loss {total_loss / len(celeba_loader_test)}")
-            print(
-                f"Epoch {epoch}, Test True Positives {total_true_positives / len(celeba_loader_test)}"
-            )
-            print(
-                f"Epoch {epoch}, Test True Negatives {total_true_negatives / len(celeba_loader_test)}"
-            )
-            print(
-                f"Epoch {epoch}, Test False Positives {total_false_positives / len(celeba_loader_test)}"
-            )
-            print(
-                f"Epoch {epoch}, Test False Negatives {total_false_negatives / len(celeba_loader_test)}"
-            )
+            print(f"Epoch {epoch}, Test True Positives {total_true_positives}")
+            print(f"Epoch {epoch}, Test True Negatives {total_true_negatives}")
+            print(f"Epoch {epoch}, Test False Positives {total_false_positives}")
+            print(f"Epoch {epoch}, Test False Negatives {total_false_negatives}")
 
 
 def main(config):
