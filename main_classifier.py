@@ -9,7 +9,7 @@ from utils import get_metrics
 
 
 def train(model, celeba_loader_train, celeba_loader_test, config):
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss(pos_weight=config.pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
     print(f"Dataloader size: {len(celeba_loader_train)}")
@@ -23,12 +23,13 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
             images = images.to(config.device)
             labels = labels.to(config.device)
             outputs = model(images)
+            probs = torch.sigmoid(outputs)
             loss = criterion(outputs, labels)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-            preds = torch.round(outputs)
+            preds = torch.round(probs)
 
             true_positives, true_negatives, false_positives, false_negatives = (
                 get_metrics(preds, labels)
@@ -64,8 +65,9 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
                     labels = labels.to(config.device)
                     outputs = model(images)
                     loss = criterion(outputs, labels)
+                    probs = torch.sigmoid(outputs)
                     total_loss += loss.item()
-                    preds = torch.round(outputs)
+                    preds = torch.round(probs)
                     true_positives, true_negatives, false_positives, false_negatives = (
                         get_metrics(preds, labels)
                     )
@@ -174,6 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--save_epoch", type=int, default=10)
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--pos_weight", type=float, default=0.3)
 
     config = parser.parse_args()
     print(config)

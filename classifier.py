@@ -234,7 +234,6 @@ class ResNet(nn.Module):
         out = self.avgpool(out)
         out = torch.flatten(out, 1)
         out = self.fc(out)
-        out = torch.sigmoid(out)
 
         return out
 
