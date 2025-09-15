@@ -9,7 +9,7 @@ from utils import get_metrics
 
 
 def train(model, celeba_loader_train, celeba_loader_test, config):
-    criterion = nn.BCEWithLogitsLoss(pos_weight=config.pos_weight)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(config.pos_weight))
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
     print(f"Dataloader size: {len(celeba_loader_train)}")
