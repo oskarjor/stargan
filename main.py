@@ -39,6 +39,7 @@ def main(config):
             "CelebA",
             config.mode,
             config.num_workers,
+            balance_attr=config.balance_attr,
         )
     if config.dataset in ["RaFD", "Both"]:
         rafd_loader = get_loader(
@@ -51,6 +52,7 @@ def main(config):
             "RaFD",
             config.mode,
             config.num_workers,
+            balance_attr=config.balance_attr,
         )
 
     # Save the config to a json file
@@ -164,6 +166,12 @@ if __name__ == "__main__":
         nargs="+",
         help="selected attributes for the CelebA dataset",
         default=["Black_Hair", "Blond_Hair", "Brown_Hair", "Male", "Young"],
+    )
+    parser.add_argument(
+        "--balance_attr",
+        type=str,
+        default=None,
+        help="attribute to balance the dataset",
     )
 
     # Test configuration.

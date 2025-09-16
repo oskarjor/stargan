@@ -1,4 +1,5 @@
 from torch.utils import data
+from torch.utils.data import WeightedRandomSampler
 from torchvision import transforms as T
 from torchvision.datasets import ImageFolder
 from PIL import Image
@@ -103,6 +104,7 @@ def get_loader(
     mode="train",
     num_workers=1,
     target_class=None,
+    balance_attr=None,
 ):
     """Build and return a data loader."""
     transform = []
@@ -121,10 +123,43 @@ def get_loader(
     elif dataset == "RaFD":
         dataset = ImageFolder(image_dir, transform)
 
+    sampler = None
+    if dataset.__class__.__name__ == "CelebA" and balance_attr is not None:
+        if balance_attr not in selected_attrs:
+            raise ValueError(
+                f"balance_attr '{balance_attr}' must be included in selected_attrs to balance by it."
+            )
+        attr_idx_in_selected = selected_attrs.index(balance_attr)
+        records = dataset.train_dataset if mode == "train" else dataset.test_dataset
+        # Collect binary labels for the balancing attribute
+        labels = []
+        for item in records:
+            label_list = item[1]  # item structure: [filename, label, (optional) target]
+            label_val = 1 if bool(label_list[attr_idx_in_selected]) else 0
+            labels.append(label_val)
+        # Compute class counts and inverse-frequency weights
+        num_pos = sum(labels)
+        num_neg = len(labels) - num_pos
+        # Avoid division by zero
+        if num_pos == 0 or num_neg == 0:
+            # Degenerate case: cannot balance a single-class subset
+            # Fall back to regular shuffling
+            sampler = None
+        else:
+            weight_for_class = {0: 1.0 / num_neg, 1: 1.0 / num_pos}
+            sample_weights = [weight_for_class[y] for y in labels]
+            sampler = WeightedRandomSampler(
+                sample_weights, num_samples=len(labels), replacement=True
+            )
+            print(
+                f"Balanced sampler created with {num_pos} positive and {num_neg} negative samples."
+            )
+
     data_loader = data.DataLoader(
         dataset=dataset,
         batch_size=batch_size,
-        shuffle=(mode == "train"),
+        shuffle=(sampler is None and mode == "train"),
+        sampler=sampler,
         num_workers=num_workers,
     )
     return data_loader
