@@ -10,7 +10,9 @@ import random
 class CelebA(data.Dataset):
     """Dataset class for the CelebA dataset."""
 
-    def __init__(self, image_dir, attr_path, selected_attrs, transform, mode):
+    def __init__(
+        self, image_dir, attr_path, selected_attrs, transform, mode, target_class=None
+    ):
         """Initialize and preprocess the CelebA dataset."""
         self.image_dir = image_dir
         self.attr_path = attr_path
@@ -21,6 +23,7 @@ class CelebA(data.Dataset):
         self.test_dataset = []
         self.attr2idx = {}
         self.idx2attr = {}
+        self.target_class = target_class
         self.preprocess()
 
         if mode == "train":
@@ -45,23 +48,44 @@ class CelebA(data.Dataset):
             values = split[1:]
 
             label = []
+            target = []
             for attr_name in self.selected_attrs:
                 idx = self.attr2idx[attr_name]
                 label.append(values[idx] == "1")
 
+            if self.target_class is not None:
+                idx = self.attr2idx[self.target_class]
+                target.append(values[idx] == "1")
+
             if (i + 1) < 2000:
-                self.test_dataset.append([filename, label])
+                if self.target_class is not None:
+                    self.test_dataset.append([filename, label, target])
+                else:
+                    self.test_dataset.append([filename, label])
             else:
-                self.train_dataset.append([filename, label])
+                if self.target_class is not None:
+                    self.train_dataset.append([filename, label, target])
+                else:
+                    self.train_dataset.append([filename, label])
 
         print("Finished preprocessing the CelebA dataset...")
 
     def __getitem__(self, index):
         """Return one image and its corresponding attribute label."""
         dataset = self.train_dataset if self.mode == "train" else self.test_dataset
-        filename, label = dataset[index]
+        if self.target_class is not None:
+            filename, label, target = dataset[index]
+        else:
+            filename, label = dataset[index]
         image = Image.open(os.path.join(self.image_dir, filename))
-        return self.transform(image), torch.FloatTensor(label)
+        if self.target_class is not None:
+            return (
+                self.transform(image),
+                torch.FloatTensor(label),
+                torch.FloatTensor(target),
+            )
+        else:
+            return self.transform(image), torch.FloatTensor(label)
 
     def __len__(self):
         """Return the number of images."""
@@ -78,6 +102,7 @@ def get_loader(
     dataset="CelebA",
     mode="train",
     num_workers=1,
+    target_class=None,
 ):
     """Build and return a data loader."""
     transform = []
@@ -90,7 +115,9 @@ def get_loader(
     transform = T.Compose(transform)
 
     if dataset == "CelebA":
-        dataset = CelebA(image_dir, attr_path, selected_attrs, transform, mode)
+        dataset = CelebA(
+            image_dir, attr_path, selected_attrs, transform, mode, target_class
+        )
     elif dataset == "RaFD":
         dataset = ImageFolder(image_dir, transform)
 
