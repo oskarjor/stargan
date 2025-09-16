@@ -4,6 +4,7 @@ stargan_celeba/
 *.out
 classifier/models/
 classifier/logs/
+temp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
