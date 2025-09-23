@@ -22,6 +22,11 @@ def train(model, celeba_loader_train, celeba_loader_test, config):
         for images, labels in celeba_loader_train:
             images = images.to(config.device)
             labels = labels.to(config.device)
+
+            # apply random noise to images
+            images = images + torch.randn_like(images) * config.noise_std
+            images = images.clamp(-1, 1)
+
             outputs = model(images)
             probs = torch.sigmoid(outputs)
             loss = criterion(outputs, labels)
@@ -161,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_epoch", type=int, default=10)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--pos_weight", type=float, default=0.3)
+    parser.add_argument("--noise_std", type=float, default=0.1)
 
     config = parser.parse_args()
     print(config)
