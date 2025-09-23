@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from model import Generator, Discriminator
-from classifier import resnet18
+from classifier import resnet18, resnet50
 from data_loader import get_loader
 from utils import get_metrics, print_metrics_with_intervention, save_images_with_labels
 from torchvision.utils import make_grid, save_image
@@ -52,11 +52,16 @@ def load_config_and_model(model_dir=None, model_name=None):
     return config, G, D
 
 
-def get_resnet_classifier(path=None):
+def get_resnet_classifier(path=None, resnet_type="resnet18"):
     if path is None:
         raise ValueError("Path to resnet classifier is required")
+    if resnet_type == "resnet18":
+        resnet = resnet18(num_classes=1)
+    elif resnet_type == "resnet50":
+        resnet = resnet50(num_classes=1)
+    else:
+        raise ValueError(f"Resnet type {resnet_type} not found")
 
-    resnet = resnet18(num_classes=1)
     resnet.load_state_dict(torch.load(path, map_location=lambda storage, loc: storage))
     return resnet
 
@@ -118,14 +123,14 @@ def save_images_and_preds(images, preds, new_images, new_preds, target, save_dir
 if __name__ == "__main__":
     # Load models and config
     config, G, _ = load_config_and_model(
-        model_dir="stargan_celeba_128/models", model_name="180000"
+        model_dir="stargan_celeba_256/models/no_young_bal_gray", model_name="200000"
     )
 
     device = "mps"
     G = G.to(device)
 
-    classifier = get_resnet_classifier("classifier/models/res_18_epoch_10.pth").to(
-        device
+    classifier = get_resnet_classifier("classifier/models/res50_epoch10_256.pth", "resnet50").to(
+        device  
     )
     split = "test"
     celeba_loader = get_loader(
@@ -142,17 +147,18 @@ if __name__ == "__main__":
     )
 
     print(config["selected_attrs"])
-    intervention_attr = "Young"
+    intervention_attr = "Gray_Hair"
 
-    relevant_idx = config["selected_attrs"].index(intervention_attr)
-    related_idx = [
-        config["selected_attrs"].index(color)
-        for color in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]
-        if color != intervention_attr
-    ]
+    if intervention_attr is not None:
+        relevant_idx = config["selected_attrs"].index(intervention_attr)
+        related_idx = [
+            config["selected_attrs"].index(color)
+            for color in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]
+            if color != intervention_attr
+        ]
 
-    relevant_idx = torch.tensor([relevant_idx]).to(device)
-    related_idx = torch.tensor([related_idx]).to(device)
+        relevant_idx = torch.tensor([relevant_idx]).to(device)
+        related_idx = torch.tensor([related_idx]).to(device)
 
     total_metrics = {
         "true_positives": 0,
@@ -167,53 +173,62 @@ if __name__ == "__main__":
         "false_negatives": 0,
     }
 
+    is_saving = True
+
+    # TODO: add noising to images to avoid making classification too easy
+
     for i, (images, gen_labels, target) in enumerate(celeba_loader):
-        if i > 10:
-            break
+        if is_saving:
+            print(f"Processing batch {i}")
+            if i > 10:
+                break
         images = images.to(device)
         gen_labels = gen_labels.to(device)
         target = target.to(device)
         probs = classifier(images)
         probs = torch.sigmoid(probs)
         preds = torch.round(probs)
-        if intervention_attr in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]:
-            new_gen_labels = swap_hair_color(gen_labels, relevant_idx, related_idx)
-        else:
-            new_gen_labels = gen_labels.clone()
-            new_gen_labels[:, relevant_idx] = 1 - new_gen_labels[:, relevant_idx]
-
-        new_images = G(images, new_gen_labels)
-        new_target = target.clone()
-        if intervention_attr == "Young":
-            new_target = 1 - new_target
-
-        new_probs = classifier(new_images)
-        new_probs = torch.sigmoid(new_probs)
-        new_preds = torch.round(new_probs)
-
         metrics = get_metrics(preds, target)
-        gen_metrics = get_metrics(new_preds, new_target)
 
         total_metrics["true_positives"] += metrics[0]
         total_metrics["true_negatives"] += metrics[1]
         total_metrics["false_positives"] += metrics[2]
         total_metrics["false_negatives"] += metrics[3]
+        if is_saving:
+            os.makedirs(f"temp/{intervention_attr}", exist_ok=True)
+            save_images_with_labels(
+                images, target, preds, f"temp/{intervention_attr}/{i}_original_images"
+            )
+
+        if intervention_attr in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]:
+            gen_labels = swap_hair_color(gen_labels, relevant_idx, related_idx)
+        elif intervention_attr == None:
+            pass
+        else:
+            gen_labels[:, relevant_idx] = 1 - gen_labels[:, relevant_idx]
+
+        images = G(images, gen_labels)
+        if intervention_attr == "Young":
+            target = 1 - target
+
+        probs = classifier(images)
+        probs = torch.sigmoid(probs)
+        preds = torch.round(probs)
+
+        gen_metrics = get_metrics(preds, target)
 
         total_gen_metrics["true_positives"] += gen_metrics[0]
         total_gen_metrics["true_negatives"] += gen_metrics[1]
         total_gen_metrics["false_positives"] += gen_metrics[2]
         total_gen_metrics["false_negatives"] += gen_metrics[3]
 
-        os.makedirs(f"temp/{intervention_attr}", exist_ok=True)
-        save_images_with_labels(
-            images, target, preds, f"temp/{intervention_attr}/{i}_original_images"
-        )
-        save_images_with_labels(
-            new_images,
-            new_target,
-            new_preds,
-            f"temp/{intervention_attr}/{i}_new_images",
-        )
+        if is_saving:
+            save_images_with_labels(
+                images,
+                target,
+                preds,
+                f"temp/{intervention_attr}/{i}_new_images",
+            )
 
     print_metrics_with_intervention(total_metrics, "Young", None)
     print("\n\n")
