@@ -60,8 +60,10 @@ def print_metrics_with_intervention(metrics, attribute_name, intervention_attr):
         f"{'Predicted ' + neg_attribute_name:<20}| {metrics['false_negatives']:<20}| {metrics['true_negatives']:<20}"
     )
     print("-" * 63)
+    denominator = metrics['true_positives'] + metrics['true_negatives'] + metrics['false_positives'] + metrics['false_negatives']
+    accuracy = (metrics['true_positives'] + metrics['true_negatives']) / denominator if denominator != 0 else 0
     print(
-        f"Accuracy: {(metrics['true_positives'] + metrics['true_negatives']) / (metrics['true_positives'] + metrics['true_negatives'] + metrics['false_positives'] + metrics['false_negatives'])}"
+        f"Accuracy: {accuracy}"
     )
     print("-" * 63)
 
