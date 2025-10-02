@@ -6,16 +6,23 @@ import torch.nn.functional as F
 from model import Generator, Discriminator
 from classifier import resnet18, resnet50
 from data_loader import get_loader
-from utils import get_metrics, print_metrics_with_intervention, save_images_with_labels
+from utils import get_metrics, print_metrics_with_intervention, save_images_with_labels, denorm, generate_all_z_vectors, filter_relevant_z_vectors
 from torchvision.utils import make_grid, save_image
 import numpy as np
+from torchvision import transforms as T
+from data_loader import CelebA
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 
-def denorm(x):
-    """Convert the range from [-1, 1] to [0, 1]."""
-    out = (x + 1) / 2
-    return out.clamp_(0, 1)
-
+def get_transform(config):
+    transform = []
+    transform.append(T.CenterCrop(config["celeba_crop_size"]))
+    transform.append(T.Resize(config["image_size"]))
+    transform.append(T.ToTensor())
+    transform.append(T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
+    transform = T.Compose(transform)
+    return transform
 
 def load_config_and_model(model_dir=None, model_name=None):
     """Load config and model from a directory.
@@ -120,41 +127,30 @@ def save_images_and_preds(images, preds, new_images, new_preds, target, save_dir
     np.save(f"{save_dir}/preds.npy", all_preds.detach().cpu().numpy())
 
 
-if __name__ == "__main__":
-    # Load models and config
-    config, G, _ = load_config_and_model(
-        model_dir="stargan_celeba_256/models/no_young_bal_gray", model_name="200000"
-    )
-
-    device = "mps"
-    G = G.to(device)
-
-    classifier = get_resnet_classifier("classifier/models/res50_epoch10_256.pth", "resnet50").to(
-        device  
-    )
-    split = "test"
+def calculate_metrics(config, G, classifier, device, intervention_attr, classification_attr, batch_size, split, save_images):
+    # LOAD DATALOADER
     celeba_loader = get_loader(
         config["celeba_image_dir"],
         config["attr_path"],
         config["selected_attrs"],
         config["celeba_crop_size"],
         config["image_size"],
-        16,
+        batch_size,
         "CelebA",
         split,
-        config["num_workers"],
-        "Young",
+        0,
+        classification_attr,
     )
 
-    print(config["selected_attrs"])
-    intervention_attr = "Gray_Hair"
 
     if intervention_attr is not None:
+        if intervention_attr not in config["selected_attrs"]:
+            raise ValueError(f"Intervention attribute must be one of {config['selected_attrs']} or None, was {intervention_attr}")
         relevant_idx = config["selected_attrs"].index(intervention_attr)
         related_idx = [
             config["selected_attrs"].index(color)
             for color in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]
-            if color != intervention_attr
+            if color != intervention_attr and color in config["selected_attrs"]
         ]
 
         relevant_idx = torch.tensor([relevant_idx]).to(device)
@@ -173,63 +169,225 @@ if __name__ == "__main__":
         "false_negatives": 0,
     }
 
-    is_saving = True
-
     # TODO: add noising to images to avoid making classification too easy
-
-    for i, (images, gen_labels, target) in enumerate(celeba_loader):
-        if is_saving:
-            print(f"Processing batch {i}")
-            if i > 10:
+    with torch.no_grad():
+        for i, (images, gen_labels, target) in enumerate(celeba_loader):
+            if i > 10 and save_images:
                 break
-        images = images.to(device)
-        gen_labels = gen_labels.to(device)
-        target = target.to(device)
-        probs = classifier(images)
-        probs = torch.sigmoid(probs)
-        preds = torch.round(probs)
-        metrics = get_metrics(preds, target)
+            images = images.to(device)
+            gen_labels = gen_labels.to(device)
+            target = target.to(device)
+            probs = classifier(images)
+            probs = torch.sigmoid(probs)
+            preds = torch.round(probs)
+            metrics = get_metrics(preds, target)
 
-        total_metrics["true_positives"] += metrics[0]
-        total_metrics["true_negatives"] += metrics[1]
-        total_metrics["false_positives"] += metrics[2]
-        total_metrics["false_negatives"] += metrics[3]
-        if is_saving:
-            os.makedirs(f"temp/{intervention_attr}", exist_ok=True)
-            save_images_with_labels(
-                images, target, preds, f"temp/{intervention_attr}/{i}_original_images"
-            )
+            total_metrics["true_positives"] += metrics[0]
+            total_metrics["true_negatives"] += metrics[1]
+            total_metrics["false_positives"] += metrics[2]
+            total_metrics["false_negatives"] += metrics[3]
+            if save_images:
+                os.makedirs(f"temp/{intervention_attr}", exist_ok=True)
+                save_images_with_labels(
+                    images, target, preds, f"temp/{intervention_attr}/{i}_original_images"
+                )
 
-        if intervention_attr in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]:
-            gen_labels = swap_hair_color(gen_labels, relevant_idx, related_idx)
-        elif intervention_attr == None:
-            pass
-        else:
-            gen_labels[:, relevant_idx] = 1 - gen_labels[:, relevant_idx]
+            if intervention_attr in ["Gray_Hair", "Black_Hair", "Blond_Hair", "Brown_Hair"]:
+                gen_labels = swap_hair_color(gen_labels, relevant_idx, related_idx)
+            elif intervention_attr == None:
+                pass
+            else:
+                gen_labels[:, relevant_idx] = 1 - gen_labels[:, relevant_idx]
 
-        images = G(images, gen_labels)
-        if intervention_attr == "Young":
-            target = 1 - target
+            images = G(images, gen_labels)
+            if intervention_attr == classification_attr:
+                target = 1 - target
 
-        probs = classifier(images)
-        probs = torch.sigmoid(probs)
-        preds = torch.round(probs)
+            probs = classifier(images)
+            probs = torch.sigmoid(probs)
+            preds = torch.round(probs)
 
-        gen_metrics = get_metrics(preds, target)
+            gen_metrics = get_metrics(preds, target)
 
-        total_gen_metrics["true_positives"] += gen_metrics[0]
-        total_gen_metrics["true_negatives"] += gen_metrics[1]
-        total_gen_metrics["false_positives"] += gen_metrics[2]
-        total_gen_metrics["false_negatives"] += gen_metrics[3]
+            total_gen_metrics["true_positives"] += gen_metrics[0]
+            total_gen_metrics["true_negatives"] += gen_metrics[1]
+            total_gen_metrics["false_positives"] += gen_metrics[2]
+            total_gen_metrics["false_negatives"] += gen_metrics[3]
 
-        if is_saving:
-            save_images_with_labels(
-                images,
-                target,
-                preds,
-                f"temp/{intervention_attr}/{i}_new_images",
-            )
+            if save_images:
+                save_images_with_labels(
+                    images,
+                    target,
+                    preds,
+                    f"temp/{intervention_attr}/{i}_new_images",
+                )
 
-    print_metrics_with_intervention(total_metrics, "Young", None)
-    print("\n\n")
-    print_metrics_with_intervention(total_gen_metrics, "Young", intervention_attr)
+        print_metrics_with_intervention(total_metrics, classification_attr, None)
+        print("\n\n")
+        print_metrics_with_intervention(total_gen_metrics, classification_attr, intervention_attr)
+
+def single_image_all_variations(image_idx, config, G, classifier, image_save_path, device, classification_attr, D, celeba_dataset, z_vectors, split, max_batch_size):
+
+    if classification_attr in config["selected_attrs"]:
+        classification_attr_idx = config["selected_attrs"].index(classification_attr)
+    else:
+        classification_attr_idx = None
+
+    image, label, target = celeba_dataset[image_idx]
+
+    os.makedirs(image_save_path, exist_ok=True)
+    label_str = '_'.join(map(str, label.int().tolist()))
+    
+    with torch.no_grad():
+        logits = classifier(image.unsqueeze(0).to(device))
+        probs = torch.sigmoid(logits)
+        out_src, _ = D(image.unsqueeze(0).to(device))
+        real_src = out_src.mean()
+        save_image(denorm(image), os.path.join(image_save_path, f"real_z_{label_str}_prob_{probs.item():.3f}_target_{target.item():.0f}_real_{real_src.item():.3f}.png"))
+
+    n_images = z_vectors.shape[0]
+    # Pre-allocate on CPU (lighter memory footprint)
+    images = image.repeat(max_batch_size, 1, 1, 1)
+    targets = target.repeat(max_batch_size, 1)
+
+    del image, label
+
+    dataloader = DataLoader(z_vectors, batch_size=max_batch_size, pin_memory=True)
+
+    loss = 0
+    realness = 0
+    
+    # Pre-compute target value (constant across all batches)
+    target_val = target.item()
+
+    with torch.no_grad():
+        losses = torch.zeros(n_images)
+        realnesses = torch.zeros(n_images)
+        for i, batch_z_vectors in enumerate(dataloader):
+            batch_size = batch_z_vectors.shape[0]
+            current_images = images[:batch_size].to(device, non_blocking=True)
+            current_targets = targets[:batch_size].to(device, non_blocking=True)
+            batch_z_vectors = batch_z_vectors.to(device, non_blocking=True)
+
+
+            # Generate images
+            new_images = G(current_images, batch_z_vectors)
+            
+            # Compute metrics in batch
+            logits = classifier(new_images)
+            out_src, _ = D(new_images)
+
+            if classification_attr_idx is not None:
+                current_targets = batch_z_vectors[:, classification_attr_idx].unsqueeze(1).to(torch.float32)
+
+            
+            # Accumulate metrics (minimize .item() calls)
+            _losses = F.binary_cross_entropy_with_logits(logits, current_targets, reduction="none").mean(dim=tuple(range(1, logits.dim())))
+            loss += _losses.mean().item() * batch_size
+            realness += out_src.mean().item() * batch_size
+            
+            # Batch denormalize BEFORE moving to CPU
+            new_images_denorm = denorm(new_images)
+            
+            # Single transfer to CPU for all tensors
+            probs = torch.sigmoid(logits).cpu()
+            batch_z_vectors_cpu = batch_z_vectors.cpu()
+            new_images_cpu = new_images_denorm.cpu()
+            
+            # Get real_src for each image in the batch
+            out_src_dims = out_src.dim()
+            real_src_val = out_src.mean(dim=tuple(range(1, out_src_dims)))
+
+            losses[i*max_batch_size:i*max_batch_size + batch_size] = _losses.detach().cpu()
+            realnesses[i*max_batch_size:i*max_batch_size + batch_size] = real_src_val.detach().cpu()
+
+            target_vals = current_targets.detach().cpu()
+            # Clear GPU memory immediately
+            del current_images, current_targets, batch_z_vectors, new_images, logits, out_src, new_images_denorm
+
+            # Save images (this is still I/O bound, but optimized)
+            for i in range(batch_size):
+                # Use list comprehension for faster string conversion
+                z_str = '_'.join(str(int(x)) for x in batch_z_vectors_cpu[i].tolist())
+                filename = f"z_{z_str}_prob_{probs[i].item():.3f}_target_{target_vals[i].item():.0f}_real_{real_src_val[i].item():.3f}.png"
+                save_path = os.path.join(image_save_path, filename)
+                save_image(new_images_cpu[i], save_path)
+            
+            del new_images_cpu, probs, batch_z_vectors_cpu
+
+    # Compute means
+    mean_loss = loss / n_images
+    mean_realness = realness / n_images
+    
+    with open(f"{image_save_path}/losses.npy", "wb") as f:
+        np.save(f, losses)
+    with open(f"{image_save_path}/realnesses.npy", "wb") as f:
+        np.save(f, realnesses)
+    return mean_loss, mean_realness
+
+def all_images_all_variations(config, image_save_dir, device, classification_attr, G, D, classifier, split="test", max_batch_size=16, num_images=100):
+    # Save config attributes to json for reference
+    config_dict = {
+        "attributes": config["selected_attrs"],
+        "classification_attr": classification_attr,
+        "num_images": num_images,
+    }
+
+    os.makedirs(image_save_dir, exist_ok=True)
+        
+    config_path = os.path.join(image_save_dir, "config.json")
+    with open(config_path, "w") as f:
+        json.dump(config_dict, f, indent=4)
+
+        transform = get_transform(config)
+
+    celeba_dataset = CelebA(config["celeba_image_dir"], config["attr_path"], config["selected_attrs"], transform, split, classification_attr)
+    z_vectors = generate_all_z_vectors(config, filter_hair=(classification_attr == "Young")).to(device)
+
+
+    for image_idx in tqdm(range(num_images)):
+        image_save_path = f"{image_save_dir}/{image_idx}"
+        filtered_z_vectors = filter_relevant_z_vectors(config, z_vectors, initial_z_vector=celeba_dataset[image_idx][1])
+        if filtered_z_vectors is None:
+            continue
+        filtered_z_vectors = filtered_z_vectors.to(device)
+        single_image_all_variations(image_idx, config, G, classifier, image_save_path, device, classification_attr, D, celeba_dataset, filtered_z_vectors, split, max_batch_size)
+
+if __name__ == "__main__":
+    # HYPERPARAMETERS
+    classifier_model = "young_noise_00"
+    classifier_epoch = "model_10"
+    generator_model = "bal_gray"
+    generator_epoch = "200000"
+    max_batch_size = 32
+    classification_attr = "Young"
+    num_images = 1000
+    
+    device = "mps"
+    classifier_model_type = "resnet50"
+    split = "test"
+    intervention_attr = None
+    save_images = True
+
+    # INFERRED HYPERPARAMETERS (DO NOT CHANGE)
+    image_save_dir = f"generated_images/{generator_model}/{classifier_model}/{classifier_epoch}_only_relevant_z_vectors"
+    generator_model_dir = f"stargan_celeba_256/models/{generator_model}"
+    generator_model_name = f"{generator_epoch}"
+    classifier_model_dir = f"classifier/models/{classifier_model}"
+    classifier_model_name = f"{classifier_epoch}.pth"
+
+    # LOAD MODELS AND CONFIG
+    config, G, D = load_config_and_model(
+        model_dir=generator_model_dir, model_name=generator_model_name
+    )
+    G = G.to(device)
+    D = D.to(device).eval()
+
+    # LOAD CLASSIFIER
+    classifier = get_resnet_classifier(os.path.join(classifier_model_dir, classifier_model_name), classifier_model_type).to(
+        device  
+    ).eval()
+
+    all_images_all_variations(config, image_save_dir, device, classification_attr, G, D, classifier, split, max_batch_size, num_images)
+
+    # calculate_metrics(config, G, classifier, device, intervention_attr, classification_attr, batch_size, split, save_images)
