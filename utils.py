@@ -124,6 +124,57 @@ def get_metrics_from_saved(preds_path: str):
     gen_preds = preds[1:]
     return get_metrics(preds, labels), get_metrics(gen_preds, labels)
 
+def filter_relevant_z_vectors(config, z_vectors, initial_z_vector=None):
+    selected_attrs = config["selected_attrs"]
+    relevant_attrs = ["Young", "Eyeglasses", "Blond_Hair", "Brown_Hair", "Gray_Hair", "Black_Hair"]
+    all_other_attrs = [attr for attr in selected_attrs if attr not in relevant_attrs]
+    if initial_z_vector is None:
+        raise ValueError("Initial z vector must be provided")
+
+    filtered_z_vectors = []
+    for z_vector in z_vectors:
+        for attr in all_other_attrs:
+            if z_vector[selected_attrs.index(attr)] != initial_z_vector[selected_attrs.index(attr)]:
+                break
+        else:
+            filtered_z_vectors.append(z_vector)
+    if len(filtered_z_vectors) == 0:
+        return None
+    filtered_z_vectors = torch.stack(filtered_z_vectors)
+    return filtered_z_vectors
+
+    
+    
+
+    
+
+def generate_all_z_vectors(config, filter_hair=False):
+    selected_attrs = config["selected_attrs"]
+    num_attrs = len(selected_attrs)
+    # Generate all possible binary combinations for the attributes
+    num_combinations = 2 ** num_attrs
+    z_vectors = []
+    
+    for i in range(num_combinations):
+        # Convert number to binary and pad with zeros
+        binary = format(i, f'0{num_attrs}b')
+        # Convert binary string to list of integers
+        z_vector = [int(b) for b in binary]
+        z_vectors.append(z_vector)
+        
+    if filter_hair:
+        hair_indices = [selected_attrs.index(attr) for attr in ["Black_Hair", "Blond_Hair", "Brown_Hair", "Gray_Hair"] if attr in selected_attrs]
+        print(f"Filtering hair attributes...")
+        filtered_z_vectors = []
+        for z_vector in z_vectors:
+            hair_sum = sum(z_vector[hair_indice] for hair_indice in hair_indices)
+            if hair_sum != 1:
+                continue
+            filtered_z_vectors.append(z_vector)
+        z_vectors = filtered_z_vectors
+
+    return torch.tensor(z_vectors)
+
 
 if __name__ == "__main__":
     preds_path = "temp/Gray_Hair/preds.npy"
