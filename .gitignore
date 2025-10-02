@@ -4,6 +4,8 @@ classifier/models/
 classifier/logs/
 temp/
 stargan_*/
+generated_images/
+cherry_picked/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
